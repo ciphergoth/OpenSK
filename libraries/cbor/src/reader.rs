@@ -37,32 +37,89 @@ pub enum DecoderError {
     OutOfRangeIntegerValue,
 }
 
-/// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.
-/// Maximum level of nesting supported is 127; more deeply nested structures will fail with
-/// [`DecoderError::TooMuchNesting`].
-pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
-    read_nested(encoded_cbor, Some(i8::MAX))
+/// Options for reading a CBOR data structure.
+#[derive(Debug, Clone)]
+pub struct ReadBuilder {
+    // RFC7049 is the original CBOR RFC.
+    // The different ordering specified in RFC8949 is not currently supported.
+    rfc7049_map_order: bool,
+    max_nest: Option<i8>,
 }
 
+impl ReadBuilder {
+    /// Create a ReadBuilder representing the following default options:
+    /// No ordering imposed on maps
+    /// Maximum level of nesting supported is 127; more deeply nested structures will fail with
+    /// [`DecoderError::TooMuchNesting`].
+    pub fn new() -> ReadBuilder {
+        ReadBuilder {
+            rfc7049_map_order: false,
+            max_nest: Some(i8::MAX),
+        }
+    }
+
+    /// Don't require any ordering on the keys in maps read.
+    /// This also means there is no check for repeated keys.
+    pub fn no_map_order(self) -> ReadBuilder {
+        ReadBuilder {
+            rfc7049_map_order: false,
+            ..self
+        }
+    }
+
+    /// Require keys to be in RFC7049 canonical order
+    pub fn rfc7049_map_order(self) -> ReadBuilder {
+        ReadBuilder {
+            rfc7049_map_order: true,
+            ..self
+        }
+    }
+
+    fn set_max_nest(self, max_nest: Option<i8>) -> ReadBuilder {
+        ReadBuilder { max_nest, ..self }
+    }
+
+    /// Allow data structures to be nested to arbitrary depth
+    pub fn no_max_nest(self) -> ReadBuilder {
+        self.set_max_nest(None)
+    }
+
+    /// Ensure data structures are nested only to the maximum specified
+    pub fn max_nest(self, max_nest: i8) -> ReadBuilder {
+        self.set_max_nest(Some(max_nest))
+    }
+
+    /// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.
+    pub fn read(&self, encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
+        let mut reader = Reader::new(self, encoded_cbor);
+        let value = reader.decode_complete_data_item(self.max_nest)?;
+        if !reader.remaining_cbor.is_empty() {
+            return Err(DecoderError::ExtraneousData);
+        }
+        Ok(value)
+    }
+}
+
+/// FIXME: remove this method, use the builder instead
 /// Deserialize CBOR binary data to produce a single [`Value`], expecting that there is no additional data.  If
 /// `max_nest` is `Some(max)`, then nested structures are only supported up to the given limit (returning
 /// [`DecoderError::TooMuchNesting`] if the limit is hit).
 pub fn read_nested(encoded_cbor: &[u8], max_nest: Option<i8>) -> Result<Value, DecoderError> {
-    let mut reader = Reader::new(encoded_cbor);
-    let value = reader.decode_complete_data_item(max_nest)?;
-    if !reader.remaining_cbor.is_empty() {
-        return Err(DecoderError::ExtraneousData);
-    }
-    Ok(value)
+    ReadBuilder::new()
+        .rfc7049_map_order()
+        .set_max_nest(max_nest)
+        .read(encoded_cbor)
 }
 
 struct Reader<'a> {
+    rfc7049_map_order: bool,
     remaining_cbor: &'a [u8],
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(cbor: &'a [u8]) -> Reader<'a> {
+    pub fn new(builder: &ReadBuilder, cbor: &'a [u8]) -> Reader<'a> {
         Reader {
+            rfc7049_map_order: builder.rfc7049_map_order,
             remaining_cbor: cbor,
         }
     }
@@ -186,9 +243,11 @@ impl<'a> Reader<'a> {
         let mut value_map = Vec::<(Value, Value)>::new();
         for _ in 0..size_value {
             let key = self.decode_complete_data_item(remaining_depth.map(|d| d - 1))?;
-            if let Some(last_item) = value_map.last() {
-                if last_item.0 >= key {
-                    return Err(DecoderError::OutOfOrderKey);
+            if self.rfc7049_map_order {
+                if let Some(last_item) = value_map.last() {
+                    if last_item.0 >= key {
+                        return Err(DecoderError::OutOfOrderKey);
+                    }
                 }
             }
             value_map.push((
@@ -235,6 +294,10 @@ mod test {
         cbor_undefined,
     };
     use alloc::vec;
+
+    pub fn read(encoded_cbor: &[u8]) -> Result<Value, DecoderError> {
+        read_nested(encoded_cbor, Some(i8::MAX))
+    }
 
     #[test]
     fn test_read_unsigned() {
@@ -687,23 +750,21 @@ mod test {
             vec![0xA0],
         ];
         for cbor in cases {
-            let mut reader = Reader::new(&cbor);
-            assert!(reader.decode_complete_data_item(Some(0)).is_ok());
+            assert!(read_nested(&cbor, Some(0)).is_ok());
         }
         let map_cbor = vec![
             0xa2, // map of 2 pairs
             0x61, 0x61, // "a"
-            0x01, 0x61, 0x62, // "b"
+            0x01, // 1
+            0x61, 0x62, // "b"
             0x82, // array with 2 elements
             0x02, 0x03,
         ];
-        let mut reader = Reader::new(&map_cbor);
         assert_eq!(
-            reader.decode_complete_data_item(Some(1)),
+            read_nested(&map_cbor, Some(1)),
             Err(DecoderError::TooMuchNesting)
         );
-        reader = Reader::new(&map_cbor);
-        assert!(reader.decode_complete_data_item(Some(2)).is_ok());
+        assert!(read_nested(&map_cbor, Some(2)).is_ok());
     }
 
     #[test]
@@ -747,6 +808,7 @@ mod test {
         ];
         for cbor in cases {
             assert_eq!(read(&cbor), Err(DecoderError::OutOfOrderKey));
+            assert!(ReadBuilder::new().read(&cbor).is_ok())
         }
     }
 

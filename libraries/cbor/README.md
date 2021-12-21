@@ -14,7 +14,7 @@ This crate implements Concise Binary Object Representation (CBOR) from [RFC
 ```rust
 fn main() {
     // Build a CBOR object with various different types included. Note that this
-    // object is not built in canonical order.
+    // object is not built in RFC7049 canonical order.
     let manual_object = Value::Map(vec![
         (
             Value::Unsigned(1),
@@ -44,7 +44,7 @@ fn main() {
     sk_cbor::writer::write(manual_object, &mut manual_data);
     let hex_manual_data = hexify(&manual_data);
 
-    // Serialized version is in canonical order.
+    // Serialized version is in RFC7049 canonical order.
     println!("Serializes to {}", hex_manual_data);
     assert_eq!(
         hex_manual_data,
@@ -62,7 +62,7 @@ fn main() {
     );
 
     // Convert back to an object.  This is different than the original object,
-    // because the map is now in canonical order.
+    // because the map is now in RFC7049 canonical order.
     let recovered_object = sk_cbor::reader::read(&manual_data).unwrap();
     println!("Deserializes to {:?}", recovered_object);
 }

@@ -31,7 +31,7 @@ fn hexify(data: &[u8]) -> String {
 
 fn main() {
     // Build a CBOR object with various different types included. Note that this
-    // object is not built in canonical order.
+    // object is not built in RFC7049 canonical order.
     let manual_object = Value::Map(vec![
         (
             Value::Unsigned(1),
@@ -66,7 +66,7 @@ fn main() {
 
     assert_eq!(hex_manual_data, hex_macro_data);
 
-    // Serialized version is in canonical order.
+    // Serialized version is in RFC7049 canonical order.
     println!("Serializes to {}", hex_manual_data);
     assert_eq!(
         hex_manual_data,
@@ -84,7 +84,7 @@ fn main() {
     );
 
     // Convert back to an object.  This is different than the original object,
-    // because the map is now in canonical order.
-    let recovered_object = sk_cbor::reader::read(&manual_data).unwrap();
+    // because the map is now in RFC7049 canonical order.
+    let recovered_object = sk_cbor::reader::ReadBuilder::new().read(&manual_data).unwrap();
     println!("Deserializes to {:?}", recovered_object);
 }

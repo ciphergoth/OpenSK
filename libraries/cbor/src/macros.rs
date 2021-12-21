@@ -112,7 +112,7 @@ pub fn destructure_cbor_map_peek_value(
     }
 }
 
-/// Assert that the keys in a vector of key-value pairs are in canonical order.
+/// Assert that the keys in a vector of key-value pairs are in RFC7049 canonical order.
 #[macro_export]
 macro_rules! assert_sorted_keys {
     // Last key
